@@ -1,4 +1,6 @@
-class ParserFindTagException(Exception):
-    """Вызывается, когда парсер не может найти тег."""
+class ParserException(Exception):
+    """Базовое исключение парсера."""
 
-    pass
+
+class ParserFindTagException(ParserException):
+    """Не найден тег."""

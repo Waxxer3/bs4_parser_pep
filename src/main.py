@@ -4,22 +4,20 @@ from collections import Counter
 from urllib.parse import urljoin
 
 import requests_cache
-from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 from .configs import configure_argument_parser, configure_logging
 from .constants import MAIN_DOC_URL, PEP_URL, EXPECTED_STATUS, BASE_DIR
 from .outputs import control_output
-from .utils import find_tag, get_response
+from .exceptions import ParserException
+from .utils import find_tag, get_response, get_soup
 
 
 def whats_new(session):
     whats_new_url = urljoin(MAIN_DOC_URL, 'whatsnew/')
-    response = get_response(session, whats_new_url)
-    if response is None:
+    soup = get_soup(session, whats_new_url)
+    if soup is None:
         return
-
-    soup = BeautifulSoup(response.text, 'lxml')
     main_div = find_tag(soup, 'section', attrs={'id': 'what-s-new-in-python'})
     div_with_ul = find_tag(main_div, 'div', attrs={'class': 'toctree-wrapper'})
     sections_by_python = div_with_ul.find_all(
@@ -33,11 +31,9 @@ def whats_new(session):
         href = version_a_tag['href']
         version_link = urljoin(whats_new_url, href)
 
-        response = get_response(session, version_link)
-        if response is None:
+        soup = get_soup(session, version_link)
+        if soup is None:
             continue
-
-        soup = BeautifulSoup(response.text, 'lxml')
         h1 = find_tag(soup, 'h1')
         dl = find_tag(soup, 'dl')
         dl_text = dl.text.replace('\n', ' ')
@@ -47,11 +43,9 @@ def whats_new(session):
 
 
 def latest_versions(session):
-    response = get_response(session, MAIN_DOC_URL)
-    if response is None:
+    soup = get_soup(session, MAIN_DOC_URL)
+    if soup is None:
         return
-
-    soup = BeautifulSoup(response.text, 'lxml')
     sidebar = find_tag(soup, 'div', {'class': 'sphinxsidebarwrapper'})
     ul_tags = sidebar.find_all('ul')
 
@@ -60,7 +54,7 @@ def latest_versions(session):
             a_tags = ul.find_all('a')
             break
     else:
-        raise Exception('Ничего не нашлось')
+        raise ParserException('Ничего не нашлось')
 
     results = [('Ссылка на документацию', 'Версия', 'Статус')]
     pattern = r'Python (?P<version>\d\.\d+) \((?P<status>.*)\)'
@@ -79,11 +73,9 @@ def latest_versions(session):
 
 def download(session):
     downloads_url = urljoin(MAIN_DOC_URL, 'download.html')
-    response = get_response(session, downloads_url)
-    if response is None:
-        return None
-
-    soup = BeautifulSoup(response.text, 'lxml')
+    soup = get_soup(session, downloads_url)
+    if soup is None:
+        return
 
     downloads_dir = BASE_DIR / 'downloads'
     downloads_dir.mkdir(parents=True, exist_ok=True)
@@ -114,15 +106,37 @@ def download(session):
     return None
 
 
+def get_pep_status(session, pep_link):
+    pep_soup = get_soup(session, pep_link)
+    if pep_soup is None:
+        return None
+
+    dl_tag = (
+        pep_soup.find(
+            'dl',
+            {'class': 'rfc2822 field-list simple'}
+        )
+        or pep_soup.find('dl')
+    )
+
+    for dt in dl_tag.find_all('dt'):
+        if 'Status' in dt.text:
+            status_tag = dt.find_next_sibling('dd')
+            if status_tag:
+                return status_tag.get_text(strip=True)
+
+    return None
+
+
 def pep(session):
-    response = get_response(session, PEP_URL)
-    if response is None:
+    soup = get_soup(session, PEP_URL)
+    if soup is None:
         return
 
-    soup = BeautifulSoup(response.text, 'lxml')
-    table_tag = soup.find(
-        'table',
-        attrs={'class': 'pep-table'}) or soup.find('table')
+    table_tag = (
+        soup.find('table', attrs={'class': 'pep-table'})
+        or soup.find('table')
+    )
     tbody_tag = table_tag.find('tbody')
     tr_tags = tbody_tag.find_all('tr')
 
@@ -135,31 +149,14 @@ def pep(session):
             continue
 
         preview_status = cols[0].text[1:]
-        pep_link_tag = cols[1].find('a')
-        href = pep_link_tag['href']
-
+        href = cols[1].find('a')['href']
         pep_link = urljoin(PEP_URL, href)
-        pep_response = get_response(session, pep_link)
-        if pep_response is None:
-            continue
 
-        pep_soup = BeautifulSoup(pep_response.text, 'lxml')
-
-        dl_tag = pep_soup.find(
-            'dl',
-            {'class': 'rfc2822 field-list simple'}
-        ) or pep_soup.find('dl')
-
-        status = None
-        for dt in dl_tag.find_all('dt'):
-            if 'Status' in dt.text:
-                status_tag = dt.find_next_sibling('dd')
-                if status_tag:
-                    status = status_tag.get_text(strip=True)
-                break
-
-        if not status:
-            logging.warning(f'Не удалось определить статус для {pep_link}')
+        status = get_pep_status(session, pep_link)
+        if status is None:
+            logging.warning(
+                f'Не удалось определить статус для {pep_link}'
+            )
             continue
 
         expected_statuses = EXPECTED_STATUS.get(preview_status, ())
@@ -174,10 +171,17 @@ def pep(session):
         status_counter[status] += 1
         total += 1
 
-    results = [('Статус', 'Количество')]
-    results.extend(status_counter.items())
-    results.append(('Total', total))
+    results = [('Status', 'Count')]
+    all_statuses = {
+        status
+        for statuses in EXPECTED_STATUS.values()
+        for status in statuses
+    }
 
+    for status in sorted(all_statuses):
+        results.append((status, status_counter.get(status, 0)))
+
+    results.append(('Total', total))
     return results
 
 
@@ -201,10 +205,14 @@ def main():
     if args.clear_cache:
         session.cache.clear()
 
-    results = MODE_TO_FUNCTION[args.mode](session)
-
-    if results is not None:
-        control_output(results, args)
+    try:
+        results = MODE_TO_FUNCTION[args.mode](session)
+        if results is not None:
+            control_output(results, args)
+    except ParserException:
+        logging.exception(
+            'Во время работы парсера произошла ошибка'
+        )
 
     logging.info('Парсер завершил работу.')
 
