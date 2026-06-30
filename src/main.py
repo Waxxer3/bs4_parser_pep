@@ -137,57 +137,67 @@ def get_pep_status(session, pep_link):
 def pep(session):
     soup = get_soup(session, PEP_URL)
     if soup is None:
-        return
+        return None
 
-    table_tag = (
-        soup.find('table', attrs={'class': 'pep-table'})
-        or soup.find('table')
-    )
-    tbody_tag = table_tag.find('tbody')
-    tr_tags = tbody_tag.find_all('tr')
+    tables = soup.find_all('table', class_='pep-zero-table')
+
+    rows = []
+    for table in tables:
+        tbody = table.find('tbody')
+        if tbody:
+            rows.extend(tbody.find_all('tr'))
 
     status_counter = Counter()
     total = 0
 
-    for tr_tag in tqdm(tr_tags):
-        cols = tr_tag.find_all('td')
-        if not cols:
+    for row in tqdm(rows):
+        cols = row.find_all('td')
+        if len(cols) < 2:
             continue
 
-        preview_status = cols[0].text[1:]
-        href = cols[1].find('a')['href']
-        pep_link = urljoin(PEP_URL, href)
+        status_cell = cols[0].get_text(strip=True)
+        if not status_cell:
+            continue
+
+        link_tag = cols[1].find('a')
+        if not link_tag:
+            continue
+
+        preview_status = status_cell[-1]
+
+        pep_link = urljoin(PEP_URL, link_tag['href'])
 
         status = get_pep_status(session, pep_link)
-        if status is None:
-            logging.warning(
-                f'Не удалось определить статус для {pep_link}'
-            )
+        if not status:
+            logging.warning(f'Не удалось определить статус: {pep_link}')
             continue
 
-        expected_statuses = EXPECTED_STATUS.get(preview_status, ())
-        if status not in expected_statuses:
+        expected = EXPECTED_STATUS.get(preview_status, ())
+
+        if status not in expected:
             logging.info(
                 f'Несовпадающие статусы:\n'
                 f'{pep_link}\n'
                 f'Статус в карточке: {status}\n'
-                f'Ожидаемые статусы: {list(expected_statuses)}'
+                f'Ожидаемые: {expected}'
             )
 
         status_counter[status] += 1
         total += 1
 
     results = [('Status', 'Count')]
-    all_statuses = {
+
+    all_statuses = sorted({
         status
         for statuses in EXPECTED_STATUS.values()
         for status in statuses
-    }
+    })
 
-    for status in sorted(all_statuses):
+    for status in all_statuses:
         results.append((status, status_counter.get(status, 0)))
 
     results.append(('Total', total))
+
     return results
 
 
