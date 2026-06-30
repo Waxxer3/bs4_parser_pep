@@ -134,6 +134,22 @@ def get_pep_status(session, pep_link):
     return None
 
 
+def make_pep_results(status_counter, total):
+    results = [('Status', 'Count')]
+
+    all_statuses = sorted({
+        status
+        for statuses in EXPECTED_STATUS.values()
+        for status in statuses
+    })
+
+    for status in all_statuses:
+        results.append((status, status_counter.get(status, 0)))
+
+    results.append(('Total', total))
+    return results
+
+
 def pep(session):
     soup = get_soup(session, PEP_URL)
     if soup is None:
@@ -185,19 +201,7 @@ def pep(session):
         status_counter[status] += 1
         total += 1
 
-    results = [('Status', 'Count')]
-
-    all_statuses = sorted({
-        status
-        for statuses in EXPECTED_STATUS.values()
-        for status in statuses
-    })
-
-    for status in all_statuses:
-        results.append((status, status_counter.get(status, 0)))
-
-    results.append(('Total', total))
-
+    results = make_pep_results(status_counter, total)
     return results
 
 
