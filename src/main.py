@@ -7,7 +7,13 @@ import requests_cache
 from tqdm import tqdm
 
 from .configs import configure_argument_parser, configure_logging
-from .constants import MAIN_DOC_URL, PEP_URL, EXPECTED_STATUS, BASE_DIR
+from .constants import (
+    MAIN_DOC_URL,
+    PEP_URL,
+    EXPECTED_STATUS,
+    BASE_DIR,
+    DOWNLOADS_DIR
+)
 from .outputs import control_output
 from .exceptions import ParserException
 from .utils import find_tag, get_response, get_soup
@@ -77,7 +83,7 @@ def download(session):
     if soup is None:
         return
 
-    downloads_dir = BASE_DIR / 'downloads'
+    downloads_dir = BASE_DIR / DOWNLOADS_DIR
     downloads_dir.mkdir(parents=True, exist_ok=True)
 
     table_tag = soup.find('table')

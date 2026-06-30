@@ -5,7 +5,7 @@ import logging
 
 from prettytable import PrettyTable
 
-from constants import (
+from .constants import (
     BASE_DIR,
     DATETIME_FORMAT,
     DEFAULT_ENCODING,
@@ -48,7 +48,10 @@ def file_output(results, cli_args):
     file_path = results_dir / file_name
 
     with open(file_path, 'w', encoding=DEFAULT_ENCODING, newline='') as f:
-        writer = csv.writer(f)
+        writer = csv.writer(
+            f,
+            quoting=csv.QUOTE_MINIMAL
+        )
         writer.writerows(results)
 
     logging.info('Файл с результатами был сохранён: %s', file_path)

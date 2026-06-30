@@ -2,7 +2,7 @@ import argparse
 import logging
 from logging.handlers import RotatingFileHandler
 
-from constants import (
+from .constants import (
     BACKUP_COUNT,
     BASE_DIR,
     DEFAULT_ENCODING,
